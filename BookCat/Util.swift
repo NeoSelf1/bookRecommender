@@ -16,16 +16,51 @@ func loadEnv() -> [String: String]? {
         let contents = try String(contentsOfFile: filePath)
         var envDict: [String: String] = [:]
         
-        // 각 줄을 파싱하여 환경 변수로 저장
-        let lines = contents.split(separator: "\n")
+        // 현재 처리 중인 키와 값을 저장할 변수들
+        var currentKey: String?
+        var currentValue = ""
+        var isMultiline = false
+        
+        // 각 줄을 처리
+        let lines = contents.split(separator: "\n", omittingEmptySubsequences: false)
         for line in lines {
-            let components = line.split(separator: "=")
-            if components.count == 2 {
-                let key = String(components[0]).trimmingCharacters(in: .whitespacesAndNewlines)
-                let value = String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines)
-                envDict[key] = value
+            let trimmedLine = String(line).trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            if !isMultiline {
+                // 새로운 키-값 쌍의 시작인 경우
+                if trimmedLine.contains("=") {
+                    let parts = trimmedLine.split(separator: "=")
+                    currentKey = String(parts[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    
+                    let value = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    if value.hasPrefix("`") {
+                        // 멀티라인 값 시작
+                        isMultiline = true
+                        currentValue = String(value.dropFirst()) + "\n"
+                    } else {
+                        // 일반 한 줄 값
+                        envDict[currentKey!] = value
+                        currentKey = nil
+                    }
+                }
+            } else {
+                // 멀티라인 값 처리 중
+                if trimmedLine.hasSuffix("`") {
+                    // 멀티라인 값 종료
+                    currentValue += String(trimmedLine.dropLast())
+                    if let key = currentKey {
+                        envDict[key] = currentValue
+                    }
+                    currentKey = nil
+                    currentValue = ""
+                    isMultiline = false
+                } else {
+                    // 멀티라인 값 계속
+                    currentValue += trimmedLine + "\n"
+                }
             }
         }
+        
         return envDict
     } catch {
         print("Error reading .env file: \(error)")

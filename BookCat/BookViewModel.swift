@@ -113,7 +113,6 @@ class BookViewModel: ObservableObject {
                     return RawBook(title: arr[0], author: arr[1], publisher: arr[2])
                 }
                 
-                recommendationReason = bookRecommendation.recommendation_reason
                 await fetchBookDetails()
             }
         } catch {

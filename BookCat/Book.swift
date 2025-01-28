@@ -8,7 +8,7 @@ struct BookResponse: Decodable {
     let items: [BookItem]
 }
 
-struct BookItem: Identifiable, Decodable {
+struct BookItem: Identifiable, Decodable, Hashable {
     let id: UUID = UUID()
     let title: String          // 책 제목
     let link: String          // 네이버 도서 정보 URL
@@ -42,7 +42,6 @@ struct ChatGPTResponse: Codable {
 struct ChatGPTRecommendation: Codable {
     let ownedBooks: [String]
     let newBooks: [String]
-    let recommendation_reason: String
 }
 
 struct RawBook: Codable {

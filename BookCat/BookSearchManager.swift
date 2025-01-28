@@ -1,12 +1,11 @@
 import Foundation
 
 enum CalculationError: Error {
-    case invalid
     case noBook
 }
 
 enum GPTError: Error {
-    case invalid
+    case invalidResponse
     case noKeys
 }
 
@@ -17,6 +16,7 @@ class EnhancedBookSearchManager {
     
     private let weights: [Double]
     private let initialSearchCount: Int
+    private let threshold: [Double]
     
     // 가중치를 주입하는 방식으로 initializer 설계하여, 테스트 간 가중치 조정 가능토록
     init (
@@ -24,7 +24,8 @@ class EnhancedBookSearchManager {
         authorStrategy: (CalculationStrategy, Double),
         publisherStrategy: (CalculationStrategy, Double),
         weights: [Double],
-        initialSearchCount: Int
+        initialSearchCount: Int,
+        threshold:[Double]
     ) {
         self.titleStrategy = titleStrategy
         self.authorStrategy = authorStrategy
@@ -32,37 +33,107 @@ class EnhancedBookSearchManager {
         
         self.weights = weights
         self.initialSearchCount = initialSearchCount
+        self.threshold = threshold
     }
     
-    func recommendBookFor(question: String, ownedBook: [String]) async throws {
+    func recommendBookFor(question: String, ownedBook: [String]) async throws -> [BookItem]{
         let (recommendedOwnedBookIds,recommendations) = try await getBookRecommendation(question: question, ownedBooks: ownedBook)
         
-        var validUnownedBooks: [(BookItem, [Double])] = []
+        var validUnownedBooks = [BookItem]()
+        let maxRetries = 3
         
+        // 한 질문에 대해 2개 이상의 책이 반환되는 상황을 막으려면, 질문에 대한 전체 컨텍스트에서 관리되고 공유되어야 하는 기존 책 배열이 있어야함.
+        var previousBooks = recommendations // [RawBook]
+        /// 각 책마다 재시도 횟수 3회, 기존 비교대상 서적 배열을 갖습니다.
         for book in recommendations {
+            var retryCount = 0
+            var currentBook = book
+            // previousBooks를 통해 전혀 다른 제목의 책을 추천받아 나온 연관 검색결과들이 저장되는 배열이기 때문에, 매 책마다 리셋되어 관리되어도 괜찮음.
+            var candidates = [(BookItem,[Double])]()
+            
             do {
-                if let matchedBook = try await matchToRealBook(from: book) {
-                    validUnownedBooks.append(matchedBook)
-                }
-            } catch CalculationError.invalid {
-                do {
-                    let newRecommendedRawBook = try await getAdditionalBookFromGPT(for: question,from: recommendations)
-                    
-                    if let matchedBook = try await matchToRealBook(from: newRecommendedRawBook) {
-                        validUnownedBooks.append(matchedBook)
+                while retryCount <= maxRetries { /// 재시도 횟수가 3회이하일 경우, matchToRealBook에서 유효한 결과를 받지 못한 상황에서
+                    if retryCount == maxRetries {
+                        candidates.sort(by: {
+                            $0.1.enumerated().reduce(0.0){ result, item in
+                                result + item.element*weights[item.offset]
+                            } > $1.1.enumerated().reduce(0.0){ result, item in
+                                result + item.element*weights[item.offset]
+                            }
+                        })
+                        
+//                        print("max retries reached, returning best candidate: \(candidates.first!.0.title)")
+                        validUnownedBooks.append(candidates.first!.0)
                     }
-                } catch {
-                    /// 존재하지 않는 책이 배열에 포함되어있어서, 추가 요청을 했는데, 추가 요청에서도 네트워크 통신 관련 에러가 반환될때
-                    continue
+                    
+                    let (isMatching,matchedBook,similarities) = try await matchToRealBook(from: currentBook)
+                    
+                    if isMatching, let matchedBook {
+//                        print("match Success!: \(currentBook)")
+                        validUnownedBooks.append((matchedBook))
+                        break
+                    } else if !isMatching, let matchedBook {
+//                        print("match Failure! retryCount: \(retryCount) / \(currentBook)")
+                        candidates.append((matchedBook,similarities))
+                        
+                        currentBook = try await getAdditionalBookFromGPT(for: question, from: previousBooks) // RawBook
+                        previousBooks.append(currentBook)
+                        retryCount+=1
+                    }
                 }
+            } catch {
+                print("Error during book matching: \(error)")
+                continue
             }
+        }
+        
+        return Array(Set(validUnownedBooks))
+    }
+    
+    /// 유사도가 가장 높은 최종 책 데이터를 반환하며, 반환도중 존재하지 않는 책임을 감지하면 nil을 반환합니다.
+    private func matchToRealBook(from sourceBook: RawBook) async throws -> (isMatching: Bool, book: BookItem?, similarities: [Double]) {
+        /// 각 책을 유사도와 매핑시켜 저장하기 위한 튜플 배열을 생성합니다.
+        var results = [(index:Int,value:[Double])]()
+        
+        /// 여기서 0개 searchedResult 나오면 존재하지 않는 책이라 판단 -> 1차 필터링 수행
+        guard let searchedResults = try await getSearchResults(from: sourceBook) else {
+            return (isMatching:false, book:nil, similarities:[0.0,0.0,0.0])
+        }
+        
+        /// 각 책마다 누적 유사도 값을 계산하고 배열에 id값과 함께 저장합니다.
+        for (index, searchedBook) in searchedResults.enumerated() {
+            let similarities = calculateOverAllSimilarity(for: searchedBook, from: sourceBook)
+            results.append((index:index, value: similarities))
+        }
+        
+        /// 가장 유사도가 높은 책 검출 위해 sort 실행
+        // TODO: 우선순위 큐로 변경하기
+        results.sort(by: {
+            $0.1.enumerated().reduce(0.0){ result, item in
+                result + item.element*weights[item.offset]
+            } > $1.1.enumerated().reduce(0.0){ result, item in
+                result + item.element*weights[item.offset]
+            }
+        })
+        
+        let finalBook = searchedResults[results[0].index]
+        let similarities = results[0].value
+        
+        if let result = results.first, result.value[0]>=threshold[0], result.value[1]>threshold[1] {
+            return (
+                isMatching: true,
+                book: finalBook,
+                similarities:similarities)
+        } else {
+            /// 유사도가 일정 기준을 넘기지 못할 경우, 존재하지 않는 책으로 판단 -> 2차 필터링 수행
+//            print("Failed value for \(searchedResults[results[0].index].title):\(results.first?.value)")
+            return (isMatching:false,
+                    book:finalBook,
+                    similarities:similarities)
         }
     }
     
-
-
-    
-    func matchToRealBook(from sourceBook: RawBook) async throws -> (book: BookItem, similarities: [Double])? {
+    private func getSearchResults(from sourceBook: RawBook) async throws -> [BookItem]? {
         var searchedResults: [BookItem] = []
         /// 제목으로 네이버 책 api에 검색하여 나온 상위 책 10개를 반환받습니다.
         async let searchByTitle = fetchSearchResults(sourceBook.title)
@@ -83,40 +154,15 @@ class EnhancedBookSearchManager {
                     searchedResults = try await fetchSearchResults(String(title))
                 }
             } else {
-                /// 아니면 그냥 존재하지 않는 값으로 간주하고 nil 반환
+                /// 아니면 그냥 존재하지 않는 값으로 간주하고 nil 반환 -> matchToRealBook 1차 guard let 필터링에 걸러짐
                 return nil
             }
         }
         
-        /// 각 책을 유사도와 매핑시켜 저장하기 위한 튜플 배열을 생성합니다.
-        var results = [(index:Int,value:[Double])]()
-        
-        /// 각 책마다 누적 유사도 값을 계산하고 배열에 id값과 함께 저장합니다.
-        for (index, searchedBook) in searchedResults.enumerated() {
-            let similarities = calculateOverAllSimilarity(for: searchedBook, from: sourceBook)
-            results.append((index:index, value: similarities))
-        }
-        
-        /// 가장 유사도가 높은 책 검출 위해 sort 실행
-        // TODO: 우선순위 큐로 변경하기
-        results.sort(by: {
-            $0.1.enumerated().reduce(0.0){ result, item in
-                result + item.element*weights[item.offset]
-            } > $1.1.enumerated().reduce(0.0){ result, item in
-                result + item.element*weights[item.offset]
-            }
-        })
-        /// 유사도가 일정 기준을 넘기지 못할 경우, 존재하지 않는 책으로 간주해 에러를 반환합니다.
-        guard let result = results.first,
-                result.value[0]>=0.42,
-              result.value[1]>0.85 else {
-            throw CalculationError.invalid
-        }
-        /// 가장 높은 유사도 보유한 책 데이터, 책 데이터에 대한 유사도 분포 점수
-        return (book: searchedResults[results[0].index], similarities:results[0].value)
+        return searchedResults
     }
     
-    func calculateOverAllSimilarity(for searchedBook: BookItem, from targetBook: RawBook) -> [Double] {
+    private func calculateOverAllSimilarity(for searchedBook: BookItem, from targetBook: RawBook) -> [Double] {
         let values = [
             titleStrategy.0.calculateSimilarity(searchedBook.title, targetBook.title) * titleStrategy.1,
             authorStrategy.0.calculateSimilarity(searchedBook.author, targetBook.author) * authorStrategy.1,
@@ -126,8 +172,8 @@ class EnhancedBookSearchManager {
         return values
     }
     
-    func getAdditionalBookFromGPT(for question:String, from previousResults: [RawBook]) async throws -> RawBook {
-        guard let system = loadEnv()?["ADDITIOANL_PROMPT"], let openAIApiKey = loadEnv()?["OPENAI_API_KEY"] else {
+    private func getAdditionalBookFromGPT(for question:String, from previousResults: [RawBook]) async throws -> RawBook {
+        guard let system = loadEnv()?["ADDITIONAL_PROMPT"], let openAIApiKey = loadEnv()?["OPENAI_API_KEY"] else {
             print("Prompt is missing")
             throw GPTError.noKeys
         }
@@ -165,11 +211,11 @@ class EnhancedBookSearchManager {
                 let arr = result.split(separator: "-").map { String($0) }
                 return RawBook(title: arr[0], author: arr[1], publisher: arr[2])
             } else {
-                throw GPTError.invalid
+                throw GPTError.invalidResponse
             }
         } catch {
             print("GPT Error :\(error)")
-            throw GPTError.invalid
+            throw GPTError.invalidResponse
         }
     }
     
@@ -177,7 +223,6 @@ class EnhancedBookSearchManager {
     /// - Parameter question: GPT에게 전달할 책추천에 대한 질문
     /// - Returns:[[선택된 보유도서 id값], [(미보유 도서 제목, 미보유 도서 저자, 미보유 도서 출판사)]
     private func getBookRecommendation(question:String,ownedBooks: [String]) async throws -> (recommendationFromOwned:[String],recommendationFromUnowned:[RawBook]) {
-       
         guard let system = loadEnv()?["PROMPT"], let openAIApiKey = loadEnv()?["OPENAI_API_KEY"] else {
             print("Prompt is missing")
             throw GPTError.noKeys
@@ -232,17 +277,17 @@ class EnhancedBookSearchManager {
                     recommendationFromUnowned:newBooks
                 )
             } else {
-                throw GPTError.invalid
+                throw GPTError.invalidResponse
             }
         } catch {
             print("GPT Error :\(error)")
-            throw GPTError.invalid
+            throw GPTError.invalidResponse
         }
     }
     
-    private func fetchSearchResults(_ query: String,count: Int = 10) async throws -> [BookItem] {
+    private func fetchSearchResults(_ query: String) async throws -> [BookItem] {
         let queryString = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let urlString = "https://openapi.naver.com/v1/search/book.json?query=\(queryString)&display=\(count)&start=1"
+        let urlString = "https://openapi.naver.com/v1/search/book.json?query=\(queryString)&display=\(initialSearchCount)&start=1"
         
         guard !query.isEmpty else { return [] }
         

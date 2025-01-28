@@ -3,6 +3,21 @@ protocol CalculationStrategy {
     func calculateSimilarity(_ source: String, _ target: String) -> Double
 }
 
+
+
+struct ExactMatchStrategy: CalculationStrategy {
+    func calculateSimilarity(_ source: String, _ target: String) -> Double {
+        return source == target ? 1.0 : 0.0
+    }
+}
+
+struct ContainsStrategy: CalculationStrategy {
+    func calculateSimilarity(_ source: String, _ target: String) -> Double {
+        return target.contains(source) || source.contains(target) ? 1.0 : 0.0
+    }
+}
+
+
 // MARK: -
 struct LevenshteinStrategy: CalculationStrategy {
     /// - Parameter source: 네이버 책검색 api DB 데이터
