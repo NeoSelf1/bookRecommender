@@ -10,38 +10,37 @@ enum GPTError: Error {
 }
 
 class EnhancedBookSearchManager {
-    private let titleStrategy: (CalculationStrategy, Double)
-    private let authorStrategy: (CalculationStrategy, Double)
-    private let publisherStrategy: (CalculationStrategy, Double)
+    private let titleStrategy: CalculationStrategy
+    private let authorStrategy: CalculationStrategy
     
     private let weights: [Double]
     private let initialSearchCount: Int
     private let threshold: [Double]
+    private let maxRetries: Int
     
     // 가중치를 주입하는 방식으로 initializer 설계하여, 테스트 간 가중치 조정 가능토록
     init (
-        titleStrategy: (CalculationStrategy, Double),
-        authorStrategy: (CalculationStrategy, Double),
-        publisherStrategy: (CalculationStrategy, Double),
+        titleStrategy: CalculationStrategy,
+        authorStrategy: CalculationStrategy,
         weights: [Double],
         initialSearchCount: Int,
-        threshold:[Double]
+        threshold:[Double],
+        maxRetries: Int
     ) {
         self.titleStrategy = titleStrategy
         self.authorStrategy = authorStrategy
-        self.publisherStrategy = publisherStrategy
         
         self.weights = weights
         self.initialSearchCount = initialSearchCount
         self.threshold = threshold
+        self.maxRetries = maxRetries
     }
     
-    func recommendBookFor(question: String, ownedBook: [String]) async throws -> [BookItem]{
+    func recommendBookFor(question: String, ownedBook: [String]) async throws -> (results:[BookItem],retryCount:Int){
         let (recommendedOwnedBookIds,recommendations) = try await getBookRecommendation(question: question, ownedBooks: ownedBook)
         
         var validUnownedBooks = [BookItem]()
-        let maxRetries = 3
-        
+        var overAllRetryCount = 0
         // 한 질문에 대해 2개 이상의 책이 반환되는 상황을 막으려면, 질문에 대한 전체 컨텍스트에서 관리되고 공유되어야 하는 기존 책 배열이 있어야함.
         var previousBooks = recommendations // [RawBook]
         /// 각 책마다 재시도 횟수 3회, 기존 비교대상 서적 배열을 갖습니다.
@@ -62,32 +61,32 @@ class EnhancedBookSearchManager {
                             }
                         })
                         
-//                        print("max retries reached, returning best candidate: \(candidates.first!.0.title)")
                         validUnownedBooks.append(candidates.first!.0)
                     }
                     
                     let (isMatching,matchedBook,similarities) = try await matchToRealBook(from: currentBook)
                     
+                    previousBooks.append(currentBook)
+                    
                     if isMatching, let matchedBook {
-//                        print("match Success!: \(currentBook)")
                         validUnownedBooks.append((matchedBook))
                         break
                     } else if !isMatching, let matchedBook {
-//                        print("match Failure! retryCount: \(retryCount) / \(currentBook)")
                         candidates.append((matchedBook,similarities))
                         
                         currentBook = try await getAdditionalBookFromGPT(for: question, from: previousBooks) // RawBook
-                        previousBooks.append(currentBook)
                         retryCount+=1
                     }
                 }
+                
+                overAllRetryCount+=retryCount
             } catch {
                 print("Error during book matching: \(error)")
                 continue
             }
         }
         
-        return Array(Set(validUnownedBooks))
+        return (results:Array(Set(validUnownedBooks)),retryCount:overAllRetryCount)
     }
     
     /// 유사도가 가장 높은 최종 책 데이터를 반환하며, 반환도중 존재하지 않는 책임을 감지하면 nil을 반환합니다.
@@ -126,7 +125,6 @@ class EnhancedBookSearchManager {
                 similarities:similarities)
         } else {
             /// 유사도가 일정 기준을 넘기지 못할 경우, 존재하지 않는 책으로 판단 -> 2차 필터링 수행
-//            print("Failed value for \(searchedResults[results[0].index].title):\(results.first?.value)")
             return (isMatching:false,
                     book:finalBook,
                     similarities:similarities)
@@ -164,9 +162,8 @@ class EnhancedBookSearchManager {
     
     private func calculateOverAllSimilarity(for searchedBook: BookItem, from targetBook: RawBook) -> [Double] {
         let values = [
-            titleStrategy.0.calculateSimilarity(searchedBook.title, targetBook.title) * titleStrategy.1,
-            authorStrategy.0.calculateSimilarity(searchedBook.author, targetBook.author) * authorStrategy.1,
-            publisherStrategy.0.calculateSimilarity(searchedBook.publisher, targetBook.publisher) * publisherStrategy.1
+            titleStrategy.calculateSimilarity(searchedBook.title, targetBook.title),
+            authorStrategy.calculateSimilarity(searchedBook.author, targetBook.author),
         ]
         
         return values

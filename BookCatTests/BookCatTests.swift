@@ -85,14 +85,6 @@ class BookSearchManagerTests: XCTestCase {
     
     override func setUp() {
         super.setUp()
-        viewModel = BookViewModel()
-        sut = EnhancedBookSearchManager(
-            titleStrategy: (LevenshteinStrategyWithNoParenthesis(), 1.0),
-            authorStrategy: (LevenshteinStrategy(), 1.0),
-            publisherStrategy: (LevenshteinStrategy(), 1.0),
-            weights: [0.5, 0.4, 0.1],
-            initialSearchCount: 10
-        )
     }
     
     func accurancyTester(question: String, title:String) async -> Int {
@@ -158,38 +150,17 @@ class BookSearchManagerTests: XCTestCase {
         }
     }
     
-    //    func testGainTestData() async throws {
-    //        var testData = [(String,String,String,String)]()
-    //        // MARK: - test 케이스 수집
-    //        for id in 0..<questions.count {
-    //            viewModel.question = questions[id]
-    //            await viewModel.getBookRecommendation()
-    //            viewModel.recommendationFromUnowned.forEach{
-    //                testData.append((questions[id],$0.title,$0.author,$0.publisher))
-    //            }
-    //        }
-    //        print(testData)
-    //    }
-    
     
     func testOverAllAccurancy() async throws {
-//        sut = EnhancedBookSearchManager(
-//            titleStrategy: (LevenshteinStrategyWithNoParenthesis(), 1.0),
-//            authorStrategy: (LevenshteinStrategy(), 1.0),
-//            publisherStrategy: (LevenshteinStrategy(), 1.0),
-//            weights: [0.7, 0.3, 0.0],
-//            initialSearchCount: 10,
-//            threshold: [0.42,0.80]
-//        )
-        
         sut = EnhancedBookSearchManager(
-            titleStrategy: (ContainsStrategy(), 1.0),
-            authorStrategy: (ContainsStrategy(), 1.0),
-            publisherStrategy: (ContainsStrategy(), 1.0),
-            weights: [0.7, 0.3, 0.0],
+            titleStrategy: LevenshteinStrategyWithNoParenthesis(),
+            authorStrategy: LevenshteinStrategy(),
+            weights: [0.7, 0.3],
             initialSearchCount: 10,
-            threshold: [0.42,0.80]
+            threshold: [0.42,0.80],
+            maxRetries: 3
         )
+        
         var cnt = 0
         var total = 0
         
@@ -197,7 +168,7 @@ class BookSearchManagerTests: XCTestCase {
             try await Task.sleep(nanoseconds: 1_000_000_000 / 5) /// 책 검색 api 속도 제한 초과 방지
             
             do {
-                let validBooks = try await sut.recommendBookFor(question: question,ownedBook:[])
+                let (validBooks,retryCount) = try await sut.recommendBookFor(question: question,ownedBook:[])
                 total+=validBooks.count
                 
                 for book in validBooks {
