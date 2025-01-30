@@ -1,10 +1,27 @@
 import XCTest
 @testable import BookCat
 
+struct TestResult {
+    let weights: [Double]
+    let thresholds: [Double]
+    let searchCount: Int
+    let maxRetries: Int
+    let accuracy: Double
+    let totalMatches: Int
+    let totalRetries: [Int]
+}
+
 class BookSearchManagerTests: XCTestCase {
     var sut: EnhancedBookSearchManager!
-    var viewModel: BookViewModel!
-    let questions = [
+    
+        let weightOptions: [[Double]] = [[0.7, 0.3], [0.6, 0.4]]
+    
+        let thresholdOptions: [[Double]] = [[0.40, 0.80], [0.70, 0.80]]
+    
+        let searchCountOptions: [Int] = [10, 20]
+        let maxRetriesOptions: [Int] = [3, 6]
+    
+    let questionsLegacy = [
         "심리학 입문서 추천해주세요",
         "경영/리더십 도서 중 베스트셀러는?",
         "SF 소설 중 우주를 배경으로 한 작품 있나요?",
@@ -15,11 +32,24 @@ class BookSearchManagerTests: XCTestCase {
         
         "우울할 때 읽으면 좋은 책 알려주세요",
         "면접 준비하는데 도움될 만한 책은?",
-//        "주말에 하루 만에 읽을 수 있는 가벼운 책 추천해주세요",
+        "최근 한 달간 가장 많이 팔린 책은?",
+    ]
+    
+    let questions = [
+        "요즘 스트레스가 많은데, 마음의 안정을 찾을 수 있는 책 추천해주세요.",
+        "SF와 판타지를 좋아하는데, 현실과 가상세계를 넘나드는 소설 없을까요?",
+        "창업 준비 중인데 스타트업 성공사례를 다룬 책을 찾고 있어요.",
         
-                "최근 한 달간 가장 많이 팔린 책은?",
-        //        "신간 중에서 추천할 만한 책이 있나요?",
-        //        "이 분야의 고전/필독서는 뭐가 있나요?"
+        "철학책을 처음 읽어보려고 하는데, 입문자가 읽기 좋은 책이 있을까요?",
+        "영어 원서를 읽고 싶은데 중급 수준에 맞는 책 추천해주세요.",
+        "퇴사 후 새로운 삶을 준비하는 중인데, 인생의 방향을 찾는데 도움이 될 만한 책 있나요?",
+        "육아로 지친 마음을 위로받을 수 있는 책을 찾고 있어요.",
+        "무라카미 하루키 스타일의 미스터리 소설 없을까요?",
+        
+        "'사피엔스'를 재미있게 읽었는데, 비슷한 책 추천해주세요.",
+        "우울할 때 읽으면 좋은 따뜻한 책 추천해주세요.",
+        "재미있게 웃으면서 읽을 수 있는 유머러스한 책을 찾고 있어요.",
+        "의욕이 없을 때 동기부여가 될 만한 책 없을까요?"
     ]
     
     let testCasesNew = [("심리학 입문서 추천해주세요", "심리학의 모든 것", "박지영", "더퀘스트"), ("심리학 입문서 추천해주세요", "심리학 콘서트", "노명우", "북라이프"), ("심리학 입문서 추천해주세요", "이상한 나라의 심리학", "김환", "알에이치코리아"), ("경영/리더십 도서 중 베스트셀러는?", "하버드 비즈니스 리뷰: 리더십", "하버드 비즈니스 리뷰 편집부", "한국경제신문"), ("경영/리더십 도서 중 베스트셀러는?", "초예측, 부의 미래", "최윤식", "지식노마드"), ("경영/리더십 도서 중 베스트셀러는?", "리더십의 새로운 패러다임", "존 P. 코터", "세종서적"), ("SF 소설 중 우주를 배경으로 한 작품 있나요?", "삼체", "류츠신", "단숨"), ("SF 소설 중 우주를 배경으로 한 작품 있나요?", "프로젝트 헤일메리", "앤디 위어", "알에이치코리아"), ("SF 소설 중 우주를 배경으로 한 작품 있나요?", "다크 포레스트", "류츠신", "단숨"), ("프로그래밍 초보자가 읽기 좋은 파이썬 책은?", "파이썬 for Beginner", "오윤석", "한빛미디어"), ("프로그래밍 초보자가 읽기 좋은 파이썬 책은?", "모두의 파이썬", "이승찬", "길벗"), ("프로그래밍 초보자가 읽기 좋은 파이썬 책은?", "Do it! 점프 투 파이썬", "박응용", "이지스퍼블리싱"), ("고등학생이 이해하기 쉬운 철학책 추천해주세요", "철학의 위안", "보에티우스", "현대지성"), ("고등학생이 이해하기 쉬운 철학책 추천해주세요", "철학 입문", "안광복", "사계절출판사"), ("고등학생이 이해하기 쉬운 철학책 추천해주세요", "철학의 역사", "나이젤 워버턴", "을유문화사"), ("우울할 때 읽으면 좋은 책 알려주세요", "죽음의 수용소에서", "빅터 프랭클", "청아출판사"), ("우울할 때 읽으면 좋은 책 알려주세요", "내 마음을 안아줄게", "정혜신", "창비"), ("우울할 때 읽으면 좋은 책 알려주세요", "감정은 어떻게 만들어지는가", "리사 펠드먼 배럿", "더퀘스트"), ("면접 준비하는데 도움될 만한 책은?", "면접의 기술", "김영종", "위즈덤하우스"), ("면접 준비하는데 도움될 만한 책은?", "취업 면접 바이블", "박선규", "한빛미디어"), ("면접 준비하는데 도움될 만한 책은?", "취업 성공을 위한 면접 전략", "서진영", "미래의창"), ("주말에 하루 만에 읽을 수 있는 가벼운 책 추천해주세요", "어서 오세요, 휴남동 서점입니다", "황보름", "클레이하우스"), ("주말에 하루 만에 읽을 수 있는 가벼운 책 추천해주세요", "죽음의 수용소에서", "빅터 프랭클", "청아출판사"), ("주말에 하루 만에 읽을 수 있는 가벼운 책 추천해주세요", "아몬드", "손원평", "창비")]
@@ -109,14 +139,31 @@ class BookSearchManagerTests: XCTestCase {
               - 최근 한달 간 제일 많이 팔린 책과 같이 확인이 어려운 질문은 1로 반환
             """
         
+        let advancedSystem = """
+              당신은 전문 북큐레이터입니다. 도서의 제목과 상세정보를 보고, 질문에 적합한 도서인지 여부를 0이나 1로 표현해주세요:
+            
+              1. 입/출력 형식
+              입력: 
+              - 질문 (문자열)
+              - 도서 제목: (문자열)
+              - 도서 상세정보: (문자열)
+            
+              출력: 0 또는 1
+              - 0 : 책이 질문에 대한 추천서적으로 적합하지 않음.
+              - 1 : 책이 질문에 대한 추천서적으로 적합함.
+            
+              2. 필수 규칙
+              - 최근 한달 간 제일 많이 팔린 책과 같이 확인이 어려운 질문은 1로 반환
+            """
+        
         let requestBody: [String: Any] = [
             "model": "gpt-4o",
             "messages": [
-                ["role": "system", "content": system],
+                ["role": "system", "content": advancedSystem],
                 ["role": "user", "content": prompt]
             ],
             "temperature": 0.01,
-            "max_tokens": 100
+            "max_tokens": 150
         ]
         
         guard let url = URL(string: "https://api.openai.com/v1/chat/completions") else {
@@ -150,8 +197,100 @@ class BookSearchManagerTests: XCTestCase {
         }
     }
     
+    func testOptimizeParameters() async throws {
+        var results: [TestResult] = []
+        
+        for weights in weightOptions {
+            for thresholds in thresholdOptions {
+                for searchCount in searchCountOptions {
+                    for maxRetries in maxRetriesOptions {
+                        let (accuracy, totalMatches, retries) = try await runTest(
+                            weights: weights,
+                            thresholds: thresholds,
+                            searchCount: searchCount,
+                            maxRetries: maxRetries
+                        )
+                        
+                        results.append(TestResult(
+                            weights: weights,
+                            thresholds: thresholds,
+                            searchCount: searchCount,
+                            maxRetries: maxRetries,
+                            accuracy: accuracy,
+                            totalMatches: totalMatches,
+                            totalRetries: retries
+                        ))
+                        
+                        // 진행 상황 로깅
+                        print("""
+                                테스트 진행 중:
+                                - weights: \(weights)
+                                - thresholds: \(thresholds)
+                                - searchCount: \(searchCount)
+                                - maxRetries: \(maxRetries)
+                                - accuracy: \(accuracy)
+                                - totalMatches: \(totalMatches)
+                                - retryCounts: \(retries)
+                                ----------------------
+                                """)
+                    }
+                }
+            }
+        }
+        
+        // 결과 분석 및 최적 파라미터 도출
+        let sortedResults = results.sorted { $0.accuracy > $1.accuracy }
+        let bestResult = sortedResults[0]
+        
+        print("""
+                최적 파라미터 조합:
+                - weights: \(bestResult.weights)
+                - thresholds: \(bestResult.thresholds)
+                - searchCount: \(bestResult.searchCount)
+                - maxRetries: \(bestResult.maxRetries)
+                - 최종 정확도: \(bestResult.accuracy)
+                - 총 매칭 수: \(bestResult.totalMatches)
+                """)
+    }
     
-    func testOverAllAccurancy() async throws {
+    private func runTest(
+            weights: [Double],
+            thresholds: [Double],
+            searchCount: Int,
+            maxRetries: Int
+    ) async throws -> (accuracy: Double, totalMatches: Int, retries: [Int]) {
+        sut = EnhancedBookSearchManager(
+            titleStrategy: LevenshteinStrategyWithNoParenthesis(),
+            authorStrategy: LevenshteinStrategy(),
+            weights: weights,
+            initialSearchCount: searchCount,
+            threshold: thresholds,
+            maxRetries: maxRetries
+        )
+        
+        var cnt = 0
+        var total = 0
+        var retries = [Int]()
+        for question in questions {
+            do {
+                let (validBooks, retryCount) = try await sut.recommendBookFor(question: question, ownedBook: [])
+                total += validBooks.count
+                retries.append(retryCount)
+                
+                for book in validBooks {
+                    let myBool = await accurancyTester(question: question, title: book.title)
+                    if myBool == 1 { cnt += 1 }
+                }
+            } catch {
+                print("Error during test: \(error)")
+            }
+        }
+        
+        return (Double(cnt)/Double(total), total, retries)
+    }
+    
+    //MARK: - Legacy
+    func testOverAllAccurancyLegacy() async throws {
         sut = EnhancedBookSearchManager(
             titleStrategy: LevenshteinStrategyWithNoParenthesis(),
             authorStrategy: LevenshteinStrategy(),
@@ -176,10 +315,8 @@ class BookSearchManagerTests: XCTestCase {
                     
                     let debugDescription: String = """
                         질문에 적합한 책이 최종반환되지 않았습니다.
-                        question: \(question)
-                    
-                        최종 검출된 책 제목-저자:
-                        \(book.title)-\(book.author)
+                        question: \(question) -> \(book.title)-\(book.author)
+                        재시도 횟수: \(retryCount)
                     """
                     
                     XCTAssertEqual(myBool, 1, debugDescription)
@@ -192,5 +329,26 @@ class BookSearchManagerTests: XCTestCase {
         }
         print("매칭된 케이스 개수: \(total)")
         print("최종 정확도: \(Double(cnt)/Double(total))")
+    }
+    
+    func testGetAdditionalBookFromGPT() async {
+        do {
+            sut = EnhancedBookSearchManager(
+                titleStrategy: LevenshteinStrategyWithNoParenthesis(),
+                authorStrategy: LevenshteinStrategy(),
+                weights: [0.7, 0.3],
+                initialSearchCount: 10,
+                threshold: [0.42,0.80],
+                maxRetries: 3
+            )
+            
+            let book = try await sut.getAdditionalBookFromGPT(
+                for: "요리하는 데에 참고할 수 있는 책 추천해주세요",
+                from: []
+            )
+            print(book)
+        } catch {
+            print(error)
+        }
     }
 }
