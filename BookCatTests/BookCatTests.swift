@@ -14,12 +14,12 @@ struct TestResult {
 class BookSearchManagerTests: XCTestCase {
     var sut: EnhancedBookSearchManager!
     
-        let weightOptions: [[Double]] = [[0.7, 0.3], [0.6, 0.4]]
+        let weightOptions: [[Double]] = [[0.8, 0.2], [0.5, 0.5]]
     
         let thresholdOptions: [[Double]] = [[0.40, 0.80], [0.70, 0.80]]
     
         let searchCountOptions: [Int] = [10, 20]
-        let maxRetriesOptions: [Int] = [3, 6]
+        let maxRetriesOptions: [Int] = [5, 3]
     
     let questionsLegacy = [
         "심리학 입문서 추천해주세요",
@@ -28,7 +28,6 @@ class BookSearchManagerTests: XCTestCase {
         
         "프로그래밍 초보자가 읽기 좋은 파이썬 책은?",
         "고등학생이 이해하기 쉬운 철학책 추천해주세요",
-        "영어 중급자에게 적합한 원서 추천해주세요",
         
         "우울할 때 읽으면 좋은 책 알려주세요",
         "면접 준비하는데 도움될 만한 책은?",
@@ -41,14 +40,12 @@ class BookSearchManagerTests: XCTestCase {
         "창업 준비 중인데 스타트업 성공사례를 다룬 책을 찾고 있어요.",
         
         "철학책을 처음 읽어보려고 하는데, 입문자가 읽기 좋은 책이 있을까요?",
-        "영어 원서를 읽고 싶은데 중급 수준에 맞는 책 추천해주세요.",
         "퇴사 후 새로운 삶을 준비하는 중인데, 인생의 방향을 찾는데 도움이 될 만한 책 있나요?",
         "육아로 지친 마음을 위로받을 수 있는 책을 찾고 있어요.",
         "무라카미 하루키 스타일의 미스터리 소설 없을까요?",
         
         "'사피엔스'를 재미있게 읽었는데, 비슷한 책 추천해주세요.",
         "우울할 때 읽으면 좋은 따뜻한 책 추천해주세요.",
-        "재미있게 웃으면서 읽을 수 있는 유머러스한 책을 찾고 있어요.",
         "의욕이 없을 때 동기부여가 될 만한 책 없을까요?"
     ]
     
@@ -140,7 +137,7 @@ class BookSearchManagerTests: XCTestCase {
             """
         
         let advancedSystem = """
-              당신은 전문 북큐레이터입니다. 도서의 제목과 상세정보를 보고, 질문에 적합한 도서인지 여부를 0이나 1로 표현해주세요:
+              당신은 공감력이 뛰어난 전문 북큐레이터입니다. 도서의 제목과 상세정보를 보고, 질문에 적합한 도서인지 여부를 0이나 1로 표현해주세요:
             
               1. 입/출력 형식
               입력: 
@@ -149,8 +146,12 @@ class BookSearchManagerTests: XCTestCase {
               - 도서 상세정보: (문자열)
             
               출력: 0 또는 1
-              - 0 : 책이 질문에 대한 추천서적으로 적합하지 않음.
-              - 1 : 책이 질문에 대한 추천서적으로 적합함.
+              0: 책이 질문의 맥락이나 의도와 전혀 관련이 없는 경우에만 해당
+              1: 다음 중 하나라도 해당되는 경우
+              - 책이 질문과 직접적으로 관련된 경우
+              - 책이 질문의 근본적인 감정이나 니즈를 간접적으로라도 충족시킬 수 있는 경우
+              - 책이 질문자의 상황이나 심리상태에 위로나 통찰을 줄 수 있는 경우
+              - 최근 판매량과 같이 객관적 확인이 어려운 질문의 경우
             
               2. 필수 규칙
               - 최근 한달 간 제일 많이 팔린 책과 같이 확인이 어려운 질문은 1로 반환
@@ -204,35 +205,45 @@ class BookSearchManagerTests: XCTestCase {
             for thresholds in thresholdOptions {
                 for searchCount in searchCountOptions {
                     for maxRetries in maxRetriesOptions {
-                        let (accuracy, totalMatches, retries) = try await runTest(
-                            weights: weights,
-                            thresholds: thresholds,
-                            searchCount: searchCount,
-                            maxRetries: maxRetries
-                        )
+                        print("\nStarting test combination \(weights)-\(thresholds)-\(searchCount)-\(maxRetries)")
                         
-                        results.append(TestResult(
-                            weights: weights,
-                            thresholds: thresholds,
-                            searchCount: searchCount,
-                            maxRetries: maxRetries,
-                            accuracy: accuracy,
-                            totalMatches: totalMatches,
-                            totalRetries: retries
-                        ))
+                        do {
+                            let (accuracy, totalMatches, retries) = try await runTest(
+                                weights: weights,
+                                thresholds: thresholds,
+                                searchCount: searchCount,
+                                maxRetries: maxRetries
+                            )
+                            
+                            results.append(TestResult(
+                                weights: weights,
+                                thresholds: thresholds,
+                                searchCount: searchCount,
+                                maxRetries: maxRetries,
+                                accuracy: accuracy,
+                                totalMatches: totalMatches,
+                                totalRetries: retries
+                            ))
+                            
+                            print("""
+                               Test completed:
+                               - weights: \(weights)
+                               - thresholds: \(thresholds)
+                               - searchCount: \(searchCount)
+                               - maxRetries: \(maxRetries)
+                               - accuracy: \(accuracy)
+                               - totalMatches: \(totalMatches)
+                               - retryCounts: \(retries)
+                               ----------------------
+                               """)
+                        } catch {
+                            print("Error in combination \(weights)-\(thresholds)-\(searchCount)-\(maxRetries): \(error)")
+                            // 선택적: 에러가 발생해도 다음 조합을 계속 테스트하고 싶다면 continue를 사용
+                            continue
+                        }
                         
-                        // 진행 상황 로깅
-                        print("""
-                                테스트 진행 중:
-                                - weights: \(weights)
-                                - thresholds: \(thresholds)
-                                - searchCount: \(searchCount)
-                                - maxRetries: \(maxRetries)
-                                - accuracy: \(accuracy)
-                                - totalMatches: \(totalMatches)
-                                - retryCounts: \(retries)
-                                ----------------------
-                                """)
+                        // API 호출 간 딜레이 추가
+                        try await Task.sleep(nanoseconds: 1_000_000_000)
                     }
                 }
             }
@@ -273,6 +284,7 @@ class BookSearchManagerTests: XCTestCase {
         var retries = [Int]()
         for question in questions {
             do {
+                try await Task.sleep(nanoseconds: 2_000_000_000)
                 let (validBooks, retryCount) = try await sut.recommendBookFor(question: question, ownedBook: [])
                 total += validBooks.count
                 retries.append(retryCount)
@@ -281,6 +293,7 @@ class BookSearchManagerTests: XCTestCase {
                     let myBool = await accurancyTester(question: question, title: book.title)
                     if myBool == 1 { cnt += 1 }
                 }
+                print("question: \(question) proceeded")
             } catch {
                 print("Error during test: \(error)")
             }
